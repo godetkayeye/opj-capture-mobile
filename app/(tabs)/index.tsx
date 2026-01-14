@@ -33,10 +33,10 @@ const getResponsiveFontSize = (smallSize: number, mediumSize: number): number =>
 export default function HomeScreen() {
   const [user, setUser] = useState<any>(null);
   const [stats, setStats] = useState({
-    totalCaptures: 12,
-    totalInfractions: 8,
-    totalValidations: 10,
-    totalBandits: 5,
+    totalCaptures: 0,
+    totalInfractions: 0,
+    totalValidations: 0,
+    totalBandits: 0,
   });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -78,9 +78,78 @@ export default function HomeScreen() {
   const loadDashboardData = async () => {
     try {
       const userData = await AsyncStorage.getItem('user');
+      const token = await AsyncStorage.getItem('token');
+      
       if (userData) {
         setUser(JSON.parse(userData));
       }
+
+      // Charger les statistiques depuis l'API
+      if (token) {
+        try {
+          const capturesRes = await fetch('http://72.61.97.77:8000/api/captures', {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          
+          const banditRes = await fetch('http://72.61.97.77:8000/api/bandits', {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+
+          let capturesCount = 0;
+          let validatedCount = 0;
+          let banditCount = 0;
+
+          // Charger les captures
+          if (capturesRes.ok) {
+            const capturesData = await capturesRes.json();
+            
+            // Gérer différents formats de réponse
+            let capturesArray = Array.isArray(capturesData) 
+              ? capturesData 
+              : (capturesData['hydra:member'] || capturesData.data || []);
+            
+            capturesCount = capturesData['hydra:totalItems'] || capturesArray.length || 0;
+            
+            // Compter les captures validées
+            validatedCount = capturesArray.filter((c: any) => {
+              const status = c.status || c.etat || '';
+              return status.toLowerCase() === 'validé';
+            }).length;
+
+            console.log('✅ Captures:', { capturesCount, validatedCount, array: capturesArray.length });
+          } else {
+            console.error('❌ Erreur captures:', capturesRes.status);
+          }
+
+          // Charger les bandits
+          if (banditRes.ok) {
+            const banditData = await banditRes.json();
+            
+            // Gérer différents formats de réponse
+            let banditArray = Array.isArray(banditData) 
+              ? banditData 
+              : (banditData['hydra:member'] || banditData.data || []);
+            
+            banditCount = banditData['hydra:totalItems'] || banditArray.length || 0;
+            
+            console.log('✅ Bandits:', { banditCount, array: banditArray.length });
+          } else {
+            console.error('❌ Erreur bandits:', banditRes.status);
+          }
+
+          console.log('📊 Stats finales:', { capturesCount, validatedCount, banditCount });
+
+          setStats({
+            totalCaptures: capturesCount,
+            totalInfractions: 0,
+            totalValidations: validatedCount,
+            totalBandits: banditCount,
+          });
+        } catch (err) {
+          console.error('💥 Erreur chargement stats:', err);
+        }
+      }
+
       setLoading(false);
     } catch (err) {
       console.error('Erreur:', err);
@@ -197,22 +266,22 @@ export default function HomeScreen() {
               <QuickActionButton
                 icon="camera-alt"
                 label="Capturer"
-                onPress={() => console.log('Capturer')}
+                onPress={() => router.push('/new-capture')}
               />
               <QuickActionButton
                 icon="done-all"
                 label="Valider"
-                onPress={() => console.log('Valider')}
+                onPress={() => router.push('/(tabs)/valider')}
               />
               <QuickActionButton
-                icon="list"
+                icon="warning"
                 label="Infractions"
-                onPress={() => console.log('Infractions')}
+                onPress={() => router.push('/(tabs)/infraction')}
               />
               <QuickActionButton
-                icon="search"
-                label="Rechercher"
-                onPress={() => console.log('Rechercher')}
+                icon="people"
+                label="Bandits"
+                onPress={() => router.push('/(tabs)/bandit')}
               />
             </View>
           </View>

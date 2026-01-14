@@ -1,4 +1,5 @@
 import { MaterialIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import React, { useEffect, useState } from 'react';
 import {
@@ -16,6 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { canDeleteBandit, filterBanditsByRole } from '../../lib/auth/rolePermissions';
 import {
   Bandit,
   FormData,
@@ -25,13 +27,15 @@ import {
   handlePickImage,
   handleSaveBandit,
   loadBandits,
+  loadCaptures,
   loadInfractions,
   toggleInfraction,
-} from './utils/bandit.logic';
-import { COLORS, styles } from './utils/bandit.styles';
+} from '../../lib/bandit/bandit.logic';
+import { COLORS, styles } from '../../lib/bandit/bandit.styles';
 
 export default function BanditScreen() {
   const [bandits, setBandits] = useState<Bandit[]>([]);
+  const [allBandits, setAllBandits] = useState<Bandit[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -43,6 +47,7 @@ export default function BanditScreen() {
   const [editingBandit, setEditingBandit] = useState<Bandit | null>(null);
   const [infractions, setInfractions] = useState([]);
   const [selectedInfractions, setSelectedInfractions] = useState<number[]>([]);
+  const [user, setUser] = useState<any>(null);
   const [formData, setFormData] = useState<FormData>({
     nom: '',
     surnom: '',
@@ -59,20 +64,84 @@ export default function BanditScreen() {
 
   const initializeData = async () => {
     setLoading(true);
-    const [banditList, infractionList] = await Promise.all([
-      loadBandits(),
-      loadInfractions(),
-    ]);
-    setBandits(banditList);
-    setInfractions(infractionList);
-    setLoading(false);
+    try {
+      // Charger les données utilisateur
+      const userJson = await AsyncStorage.getItem('user');
+      const userData = userJson ? JSON.parse(userJson) : null;
+      setUser(userData);
+
+      console.log('📱 Données utilisateur:', userData);
+
+      // Charger les bandits et infractions
+      const [banditList, infractionList, captureList] = await Promise.all([
+        loadBandits(),
+        loadInfractions(),
+        loadCaptures(),
+      ]);
+
+      console.log('🔍 Bandits reçus de l\'API:', banditList);
+      console.log('📸 Captures reçues de l\'API:', captureList);
+
+      // Stocker tous les bandits
+      setAllBandits(banditList);
+
+      // Appliquer le filtrage basé sur le rôle
+      const role = userData?.role || 'ROLE_OPJ';
+      const userId = userData?.id;
+
+      console.log('🔐 Rôle utilisateur:', role);
+      console.log('👤 ID utilisateur:', userId);
+
+      const userCaptureIds = captureList
+        .filter((capture: any) => {
+          const isOwner = capture.responsable?.id === userId || 
+                         capture.opj?.id === userId || 
+                         capture.createdBy === userId;
+          console.log(`📋 Capture ${capture.id} appartient à l'utilisateur?`, isOwner);
+          return isOwner;
+        })
+        .map((capture: any) => capture.id);
+
+      console.log('📌 IDs des captures de l\'utilisateur:', userCaptureIds);
+
+      const filteredBandits = filterBanditsByRole(banditList, role, userId, userCaptureIds);
+      
+      console.log('✅ Bandits filtrés:', filteredBandits);
+
+      setBandits(filteredBandits);
+      setInfractions(infractionList);
+    } catch (error) {
+      console.error('Erreur lors du chargement des données:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const onRefresh = async () => {
     setRefreshing(true);
-    const banditList = await loadBandits();
-    setBandits(banditList);
-    setRefreshing(false);
+    try {
+      const [banditList, captureList] = await Promise.all([
+        loadBandits(),
+        loadCaptures(),
+      ]);
+
+      const role = user?.role || 'ROLE_OPJ';
+      const userId = user?.id;
+      const userCaptureIds = captureList
+        .filter((capture: any) => {
+          return capture.responsable?.id === userId || 
+                 capture.opj?.id === userId || 
+                 capture.createdBy === userId;
+        })
+        .map((capture: any) => capture.id);
+
+      const filteredBandits = filterBanditsByRole(banditList, role, userId, userCaptureIds);
+      setBandits(filteredBandits);
+    } catch (error) {
+      console.error('Erreur lors du rafraîchissement:', error);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const handleAddBandit = () => {
@@ -183,7 +252,7 @@ export default function BanditScreen() {
           {item.etat && <Text style={styles.banditEtat}>{item.etat}</Text>}
           {item.dateAjout && (
             <Text style={styles.banditDate}>
-              Added: {new Date(item.dateAjout).toLocaleDateString('en-US')}
+              Ajouté: {new Date(item.dateAjout).toLocaleDateString('fr-FR')}
             </Text>
           )}
         </View>
@@ -201,12 +270,14 @@ export default function BanditScreen() {
         >
           <MaterialIcons name="edit" size={18} color={COLORS.white} />
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.actionButton, styles.deleteButton]}
-          onPress={() => handleDeleteBanditLocal(item.id)}
-        >
-          <MaterialIcons name="delete" size={18} color={COLORS.white} />
-        </TouchableOpacity>
+        {canDeleteBandit(item, user?.role || 'ROLE_OPJ', user?.id) && (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.deleteButton]}
+            onPress={() => handleDeleteBanditLocal(item.id)}
+          >
+            <MaterialIcons name="delete" size={18} color={COLORS.white} />
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -222,7 +293,7 @@ export default function BanditScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Bandit Management</Text>
+        <Text style={styles.headerTitle}>Gestion des Bandits</Text>
       </View>
 
       <View style={styles.searchContainer}>
@@ -283,7 +354,7 @@ export default function BanditScreen() {
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>
-                  {editingBandit ? 'Edit bandit' : 'Add bandit'}
+                  {editingBandit ? 'Modifier un bandit' : 'Ajouter un bandit'}
                 </Text>
                 <TouchableOpacity onPress={() => setModalVisible(false)}>
                   <MaterialIcons name="close" size={24} color={COLORS.textDark} />
@@ -311,41 +382,41 @@ export default function BanditScreen() {
                           onPress={handleCameraLocal}
                         >
                           <MaterialIcons name="camera-alt" size={18} color={COLORS.white} />
-                          <Text style={styles.photoButtonText}>Camera</Text>
+                          <Text style={styles.photoButtonText}>Caméra</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={[styles.photoButton, styles.galleryButton]}
                           onPress={handlePhotoPickLocal}
                         >
                           <MaterialIcons name="image" size={18} color={COLORS.white} />
-                          <Text style={styles.photoButtonText}>Gallery</Text>
+                          <Text style={styles.photoButtonText}>Galerie</Text>
                         </TouchableOpacity>
                       </View>
                     </View>
                   </View>
 
                   <View style={styles.formGroup}>
-                    <Text style={styles.label}>Name *</Text>
+                    <Text style={styles.label}>Nom *</Text>
                     <TextInput
                       style={styles.input}
-                      placeholder="Name"
+                      placeholder="Nom"
                       value={formData.nom}
                       onChangeText={(text) => setFormData({ ...formData, nom: text })}
                     />
                   </View>
 
                   <View style={styles.formGroup}>
-                    <Text style={styles.label}>Nickname</Text>
+                    <Text style={styles.label}>Surnom</Text>
                     <TextInput
                       style={styles.input}
-                      placeholder="Nickname (optional)"
+                      placeholder="Surnom (optionnel)"
                       value={formData.surnom}
                       onChangeText={(text) => setFormData({ ...formData, surnom: text })}
                     />
                   </View>
 
                   <View style={styles.formGroup}>
-                    <Text style={styles.label}>Status</Text>
+                    <Text style={styles.label}>Statut</Text>
                     <View style={styles.stateContainer}>
                       {['Capturé', 'Transféré', 'Libéré'].map((etat) => (
                         <TouchableOpacity
@@ -370,7 +441,7 @@ export default function BanditScreen() {
                   </View>
 
                   <View style={styles.formGroup}>
-                    <Text style={styles.label}>Date of Birth</Text>
+                    <Text style={styles.label}>Date de naissance</Text>
                     <TouchableOpacity
                       style={styles.dateInput}
                       onPress={() => setShowDatePicker(true)}
@@ -386,7 +457,7 @@ export default function BanditScreen() {
                   </View>
 
                   <View style={styles.formGroup}>
-                    <Text style={styles.label}>Gender</Text>
+                    <Text style={styles.label}>Genre</Text>
                     <View style={styles.sexeContainer}>
                       {[
                         { label: 'Male', value: 'M' },
@@ -420,7 +491,7 @@ export default function BanditScreen() {
 
                   <View style={styles.formGroup}>
                     <Text style={styles.label}>Infractions</Text>
-                    <Text style={styles.infractionNote}>Select associated infractions</Text>
+                    <Text style={styles.infractionNote}>Sélectionner les infractions associées</Text>
                     <View style={styles.infractionList}>
                       {infractions.map((infraction: any) => (
                         <TouchableOpacity
@@ -454,9 +525,9 @@ export default function BanditScreen() {
                 <View style={styles.datePickerView}>
                   <View style={styles.datePickerHeader}>
                     <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                      <Text style={styles.datePickerHeaderButton}>Cancel</Text>
+                      <Text style={styles.datePickerHeaderButton}>Annuler</Text>
                     </TouchableOpacity>
-                    <Text style={styles.datePickerTitle}>Select date</Text>
+                    <Text style={styles.datePickerTitle}>Sélectionner la date</Text>
                     <TouchableOpacity onPress={() => setShowDatePicker(false)}>
                       <Text style={styles.datePickerHeaderButton}>OK</Text>
                     </TouchableOpacity>
@@ -478,14 +549,14 @@ export default function BanditScreen() {
                   style={[styles.button, styles.cancelButton]}
                   onPress={() => setModalVisible(false)}
                 >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                  <Text style={styles.cancelButtonText}>Annuler</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.button, styles.saveButton]}
                   onPress={handleSaveBanditLocal}
                 >
                   <Text style={styles.saveButtonText}>
-                    {editingBandit ? 'Update' : 'Add'}
+                    {editingBandit ? 'Modifier' : 'Ajouter'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -504,7 +575,7 @@ export default function BanditScreen() {
           <View style={styles.modalOverlay}>
             <View style={styles.detailModalContent}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Bandit Details</Text>
+                <Text style={styles.modalTitle}>Détails du Bandit</Text>
                 <TouchableOpacity onPress={() => setDetailModalVisible(false)}>
                   <MaterialIcons name="close" size={24} color={COLORS.textDark} />
                 </TouchableOpacity>
@@ -533,29 +604,29 @@ export default function BanditScreen() {
                     </View>
 
                     <View style={styles.detailSection}>
-                      <Text style={styles.detailLabel}>Name</Text>
+                      <Text style={styles.detailLabel}>Nom</Text>
                       <Text style={styles.detailValue}>{selectedBandit.nom}</Text>
                     </View>
 
                     {selectedBandit.surnom && (
                       <View style={styles.detailSection}>
-                        <Text style={styles.detailLabel}>Nickname</Text>
+                        <Text style={styles.detailLabel}>Surnom</Text>
                         <Text style={styles.detailValue}>{selectedBandit.surnom}</Text>
                       </View>
                     )}
 
                     {selectedBandit.dateNaissance && (
                       <View style={styles.detailSection}>
-                        <Text style={styles.detailLabel}>Date of Birth</Text>
+                        <Text style={styles.detailLabel}>Date de naissance</Text>
                         <Text style={styles.detailValue}>
-                          {new Date(selectedBandit.dateNaissance).toLocaleDateString('en-US')}
+                          {new Date(selectedBandit.dateNaissance).toLocaleDateString('fr-FR')}
                         </Text>
                       </View>
                     )}
 
                     {selectedBandit.sexe && (
                       <View style={styles.detailSection}>
-                        <Text style={styles.detailLabel}>Gender</Text>
+                        <Text style={styles.detailLabel}>Genre</Text>
                         <View style={styles.sexeValueContainer}>
                           <MaterialIcons
                             name={selectedBandit.sexe === 'M' ? 'male' : 'female'}
@@ -563,7 +634,7 @@ export default function BanditScreen() {
                             color={COLORS.primary}
                           />
                           <Text style={styles.detailValue}>
-                            {selectedBandit.sexe === 'M' ? 'Male' : 'Female'}
+                            {selectedBandit.sexe === 'M' ? 'Masculin' : 'Féminin'}
                           </Text>
                         </View>
                       </View>
@@ -571,7 +642,7 @@ export default function BanditScreen() {
 
                     {selectedBandit.etat && (
                       <View style={styles.detailSection}>
-                        <Text style={styles.detailLabel}>Status</Text>
+                        <Text style={styles.detailLabel}>Statut</Text>
                         <View style={styles.etatBadgeContainer}>
                           <Text
                             style={[
@@ -589,7 +660,7 @@ export default function BanditScreen() {
 
                     {selectedBandit.infractions && selectedBandit.infractions.length > 0 && (
                       <View style={styles.detailSection}>
-                        <Text style={styles.detailLabel}>Associated Infractions</Text>
+                        <Text style={styles.detailLabel}>Infractions Associées</Text>
                         <View style={styles.infractionDetailList}>
                           {selectedBandit.infractions.map((infraction: any, index: number) => (
                             <View key={index} style={styles.infractionDetailItem}>
@@ -612,9 +683,9 @@ export default function BanditScreen() {
 
                     {selectedBandit.dateAjout && (
                       <View style={styles.detailSection}>
-                        <Text style={styles.detailLabel}>Date Added</Text>
+                        <Text style={styles.detailLabel}>Date d'ajout</Text>
                         <Text style={styles.detailValue}>
-                          {new Date(selectedBandit.dateAjout).toLocaleDateString('en-US', {
+                          {new Date(selectedBandit.dateAjout).toLocaleDateString('fr-FR', {
                             year: 'numeric',
                             month: 'long',
                             day: 'numeric',
@@ -629,18 +700,20 @@ export default function BanditScreen() {
                         onPress={() => handleEditBandit(selectedBandit)}
                       >
                         <MaterialIcons name="edit" size={18} color={COLORS.white} />
-                        <Text style={styles.detailActionButtonText}>Edit</Text>
+                        <Text style={styles.detailActionButtonText}>Modifier</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.detailActionButton, styles.deleteDetailButton]}
-                        onPress={() => {
-                          setDetailModalVisible(false);
-                          handleDeleteBanditLocal(selectedBandit.id);
-                        }}
-                      >
-                        <MaterialIcons name="delete" size={18} color={COLORS.white} />
-                        <Text style={styles.detailActionButtonText}>Delete</Text>
-                      </TouchableOpacity>
+                      {canDeleteBandit(selectedBandit, user?.role || 'ROLE_OPJ', user?.id) && (
+                        <TouchableOpacity
+                          style={[styles.detailActionButton, styles.deleteDetailButton]}
+                          onPress={() => {
+                            setDetailModalVisible(false);
+                            handleDeleteBanditLocal(selectedBandit.id);
+                          }}
+                        >
+                          <MaterialIcons name="delete" size={18} color={COLORS.white} />
+                          <Text style={styles.detailActionButtonText}>Supprimer</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                   </>
                 )}
@@ -651,7 +724,7 @@ export default function BanditScreen() {
                   style={[styles.button, styles.cancelButton]}
                   onPress={() => setDetailModalVisible(false)}
                 >
-                  <Text style={styles.cancelButtonText}>Close</Text>
+                  <Text style={styles.cancelButtonText}>Fermer</Text>
                 </TouchableOpacity>
               </View>
             </View>

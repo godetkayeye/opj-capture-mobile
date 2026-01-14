@@ -12,6 +12,10 @@ export interface Bandit {
   sexe?: string;
   etat?: string;
   infractions?: any[];
+  createdBy?: number;
+  userId?: number;
+  user?: { id: number; nom: string };
+  captures?: any[];
 }
 
 export interface FormData {
@@ -252,5 +256,27 @@ export const handleSaveBandit = async (
     console.error('Erreur connexion:', error);
     Alert.alert('Erreur', `Erreur de connexion: ${error}`);
     return false;
+  }
+};
+
+export const loadCaptures = async (): Promise<any[]> => {
+  try {
+    const token = await AsyncStorage.getItem('token');
+    const response = await fetch(getApiUrl('/api/captures'), {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      // Gérer les formats de réponse différents (hydra ou direct array)
+      const captureList = Array.isArray(data) ? data : data['hydra:member'] || data.data || data.captures || [];
+      return captureList;
+    }
+    return [];
+  } catch (error) {
+    console.error('Erreur chargement captures:', error);
+    return [];
   }
 };

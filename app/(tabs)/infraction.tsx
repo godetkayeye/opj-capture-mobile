@@ -2,21 +2,22 @@ import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { canManageInfractions } from '../../lib/auth/rolePermissions';
 
 const COLORS = {
   primary: '#0066cc',
@@ -54,14 +55,29 @@ export default function InfractionScreen() {
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [selectedInfraction, setSelectedInfraction] = useState<Infraction | null>(null);
   const [editingInfraction, setEditingInfraction] = useState<Infraction | null>(null);
+  const [user, setUser] = useState<any>(null);
   const [formData, setFormData] = useState({
     libelle: '',
     description: '',
   });
 
   useEffect(() => {
-    loadInfractions();
+    initializeData();
   }, []);
+
+  const initializeData = async () => {
+    try {
+      // Charger les données utilisateur
+      const userJson = await AsyncStorage.getItem('user');
+      const userData = userJson ? JSON.parse(userJson) : null;
+      setUser(userData);
+
+      // Charger les infractions
+      await loadInfractions();
+    } catch (error) {
+      console.error('Erreur lors du chargement:', error);
+    }
+  };
 
   const getApiUrl = (endpoint: string) => {
     const baseUrl = 'http://72.61.97.77:8000';
@@ -370,13 +386,15 @@ export default function InfractionScreen() {
         />
       )}
 
-      <TouchableOpacity
-        style={styles.addButton}
-        onPress={handleAddInfraction}
-        activeOpacity={0.7}
-      >
-        <MaterialIcons name="add" size={24} color={COLORS.white} />
-      </TouchableOpacity>
+      {canManageInfractions(user?.role || 'ROLE_OPJ') && (
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={handleAddInfraction}
+          activeOpacity={0.7}
+        >
+          <MaterialIcons name="add" size={24} color={COLORS.white} />
+        </TouchableOpacity>
+      )}
 
       {/* Modal d'ajout/modification */}
       <Modal
@@ -526,44 +544,48 @@ export default function InfractionScreen() {
                     )}
 
                     <View style={styles.detailActionsContainer}>
-                      <TouchableOpacity
-                        style={[styles.detailActionButton, styles.editDetailButton]}
-                        onPress={() => handleEditInfraction(selectedInfraction)}
-                      >
-                        <MaterialIcons name="edit" size={18} color={COLORS.white} />
-                        <Text style={styles.detailActionButtonText}>Modifier</Text>
-                      </TouchableOpacity>
+                      {canManageInfractions(user?.role || 'ROLE_OPJ') && (
+                        <>
+                          <TouchableOpacity
+                            style={[styles.detailActionButton, styles.editDetailButton]}
+                            onPress={() => handleEditInfraction(selectedInfraction)}
+                          >
+                            <MaterialIcons name="edit" size={18} color={COLORS.white} />
+                            <Text style={styles.detailActionButtonText}>Modifier</Text>
+                          </TouchableOpacity>
 
-                      {!selectedInfraction.isApproved && (
-                        <TouchableOpacity
-                          style={[styles.detailActionButton, styles.approveDetailButton]}
-                          onPress={() => handleApproveInfraction(selectedInfraction.id)}
-                        >
-                          <MaterialIcons name="check-circle" size={18} color={COLORS.white} />
-                          <Text style={styles.detailActionButtonText}>Approuver</Text>
-                        </TouchableOpacity>
+                          {!selectedInfraction.isApproved && (
+                            <TouchableOpacity
+                              style={[styles.detailActionButton, styles.approveDetailButton]}
+                              onPress={() => handleApproveInfraction(selectedInfraction.id)}
+                            >
+                              <MaterialIcons name="check-circle" size={18} color={COLORS.white} />
+                              <Text style={styles.detailActionButtonText}>Approuver</Text>
+                            </TouchableOpacity>
+                          )}
+
+                          {selectedInfraction.isApproved && (
+                            <TouchableOpacity
+                              style={[styles.detailActionButton, styles.rejectDetailButton]}
+                              onPress={() => handleRejectInfraction(selectedInfraction.id)}
+                            >
+                              <MaterialIcons name="close" size={18} color={COLORS.white} />
+                              <Text style={styles.detailActionButtonText}>Rejeter</Text>
+                            </TouchableOpacity>
+                          )}
+
+                          <TouchableOpacity
+                            style={[styles.detailActionButton, styles.deleteDetailButton]}
+                            onPress={() => {
+                              setDetailModalVisible(false);
+                              handleDeleteInfraction(selectedInfraction.id);
+                            }}
+                          >
+                            <MaterialIcons name="delete" size={18} color={COLORS.white} />
+                            <Text style={styles.detailActionButtonText}>Supprimer</Text>
+                          </TouchableOpacity>
+                        </>
                       )}
-
-                      {selectedInfraction.isApproved && (
-                        <TouchableOpacity
-                          style={[styles.detailActionButton, styles.rejectDetailButton]}
-                          onPress={() => handleRejectInfraction(selectedInfraction.id)}
-                        >
-                          <MaterialIcons name="close" size={18} color={COLORS.white} />
-                          <Text style={styles.detailActionButtonText}>Rejeter</Text>
-                        </TouchableOpacity>
-                      )}
-
-                      <TouchableOpacity
-                        style={[styles.detailActionButton, styles.deleteDetailButton]}
-                        onPress={() => {
-                          setDetailModalVisible(false);
-                          handleDeleteInfraction(selectedInfraction.id);
-                        }}
-                      >
-                        <MaterialIcons name="delete" size={18} color={COLORS.white} />
-                        <Text style={styles.detailActionButtonText}>Supprimer</Text>
-                      </TouchableOpacity>
                     </View>
                   </>
                 )}

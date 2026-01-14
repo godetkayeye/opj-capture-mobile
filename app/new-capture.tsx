@@ -231,8 +231,8 @@ export default function NewCaptureScreen() {
       // Construire l'objet à envoyer
       const captureData: any = {
         description: description,
-        bandit: banditId,
-        infraction: infractionId,
+        banditId: parseInt(banditId),
+        infractionId: parseInt(infractionId),
         photo: `data:image/jpeg;base64,${imageBase64}`,
       };
 

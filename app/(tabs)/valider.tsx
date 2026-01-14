@@ -16,6 +16,7 @@ import {
     View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { canValidateCapture } from '../../lib/auth/rolePermissions';
 
 const COLORS = {
   primary: '#0066cc',
@@ -70,10 +71,31 @@ export default function ValiderScreen() {
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [validationModalVisible, setValidationModalVisible] = useState(false);
   const [validationComment, setValidationComment] = useState('');
+  const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
-    loadValidatedCaptures();
+    initializeData();
   }, []);
+
+  const initializeData = async () => {
+    try {
+      // Charger les données utilisateur
+      const userJson = await AsyncStorage.getItem('user');
+      const userData = userJson ? JSON.parse(userJson) : null;
+      setUser(userData);
+
+      // Vérifier si l'utilisateur peut valider
+      if (!canValidateCapture(userData?.role || 'ROLE_OPJ')) {
+        Alert.alert('Accès refusé', 'Vous n\'avez pas les permissions pour valider les captures');
+        return;
+      }
+
+      // Charger les captures
+      await loadValidatedCaptures();
+    } catch (error) {
+      console.error('Erreur lors du chargement:', error);
+    }
+  };
 
   const getApiUrl = (endpoint: string) => {
     const baseUrl = 'http://72.61.97.77:8000';
@@ -326,21 +348,25 @@ export default function ValiderScreen() {
         >
           <MaterialIcons name="info" size={18} color={COLORS.white} />
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.actionButton, styles.commentButton]}
-          onPress={() => {
-            setSelectedCapture(item);
-            setValidationModalVisible(true);
-          }}
-        >
-          <MaterialIcons name="comment" size={18} color={COLORS.white} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.actionButton, styles.rejectButton]}
-          onPress={() => handleRejectCapture(item.id)}
-        >
-          <MaterialIcons name="close" size={18} color={COLORS.white} />
-        </TouchableOpacity>
+        {canValidateCapture(user?.role || 'ROLE_OPJ') && (
+          <>
+            <TouchableOpacity
+              style={[styles.actionButton, styles.commentButton]}
+              onPress={() => {
+                setSelectedCapture(item);
+                setValidationModalVisible(true);
+              }}
+            >
+              <MaterialIcons name="comment" size={18} color={COLORS.white} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionButton, styles.rejectButton]}
+              onPress={() => handleRejectCapture(item.id)}
+            >
+              <MaterialIcons name="close" size={18} color={COLORS.white} />
+            </TouchableOpacity>
+          </>
+        )}
       </View>
     </View>
   );
